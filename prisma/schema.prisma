@@ -1,0 +1,401 @@
+// Schema do núcleo — Vibrato Motos
+// Docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ===================== Enums =====================
+
+enum Cargo {
+  admin
+  socio
+  diretor
+  gerente
+  operador
+  investidor
+}
+
+enum TipoVeiculo {
+  moto
+  carro
+}
+
+enum ManutencaoStatus {
+  agendada
+  em_andamento
+  finalizada
+}
+
+enum VeiculoStatus {
+  disponivel
+  alugado
+  em_manutencao
+  retirada_agendada
+  reservado
+  indisponivel
+  bloqueado
+  apropriacao_indevida
+  aguardando_retirada_oficina
+  aguardando_orcamento
+  orcamento_aprovado
+  reservado_venda
+  apreendido
+  furto_roubo
+  estoque
+  perda_total
+}
+
+enum ClienteStatus {
+  ativo
+  ex_cliente
+}
+
+enum FrequenciaPagamento {
+  diario
+  semanal
+  quinzenal
+  mensal
+}
+
+enum LocacaoStatus {
+  ativa
+  encerrada
+  agendada
+}
+
+enum TipoTransacao {
+  entrada
+  saida
+}
+
+enum StatusTransacao {
+  pendente
+  pago
+  cancelado
+}
+
+enum FormaPagamento {
+  pix
+  boleto
+  cartao_credito
+  cartao_debito
+  ted
+  especie
+}
+
+// Categorias de entrada e saída (seção 7 da spec).
+// Valores compartilhados por entrada/saida quando fizer sentido (ex: manutencao).
+enum CategoriaTransacao {
+  // Entradas
+  aluguel
+  caucao
+  juros
+  multa_atraso
+  venda_moto
+  venda_carro
+  pagamento_inicial_locacao_venda
+  venda_peca
+  multa_transito
+  manutencao
+  outras_entradas
+  // Saídas
+  compra_pecas
+  devolucao_caucao
+  seguro
+  rastreador
+  impostos
+  aluguel_espaco
+  telefone
+  internet
+  energia
+  folha_equipe
+  encargos
+  compra_moto
+  compra_carro
+  ipva
+  licenciamento
+  marketing
+  royalties
+  guincho
+  taxa_espaco
+  lavagem_veiculo
+  taxa_administrativa_financeira
+  fundo_marketing
+  sistema
+  contabilidade
+  outras_saidas
+}
+
+// ===================== Modelos =====================
+
+model Locadora {
+  id         String   @id @default(cuid())
+  nome        String
+  cnpj        String?
+  responsavel String?
+  email       String
+  whatsapp    String?
+  endereco    String?
+  logoUrl     String?  @map("logo_url")
+  plano       String?
+  criadoEm    DateTime @default(now()) @map("criado_em")
+
+  usuarios       Usuario[]
+  veiculos       Veiculo[]
+  clientes       Cliente[]
+  locacoes       Locacao[]
+  transacoes     Transacao[]
+  contasBancarias ContaBancaria[]
+  manutencoes    Manutencao[]
+
+  @@map("locadora")
+}
+
+model Usuario {
+  id         String   @id @default(cuid())
+  locadoraId String   @map("locadora_id")
+  nome       String
+  email      String   @unique
+  senhaHash  String   @map("senha_hash")
+  telefone   String?
+  cargo      Cargo    @default(operador)
+  ativo      Boolean  @default(true)
+  permissoes String[] @default([]) // telas liberadas (usado p/ investidor)
+  criadoEm   DateTime @default(now()) @map("criado_em")
+
+  locadora           Locadora  @relation(fields: [locadoraId], references: [id], onDelete: Cascade)
+  locacoes           Locacao[] @relation("AtendenteLocacao")
+  veiculosInvestidor Veiculo[] @relation("Investidor")
+
+  @@index([locadoraId])
+  @@map("usuario")
+}
+
+model ContaBancaria {
+  id         String  @id @default(cuid())
+  locadoraId String  @map("locadora_id")
+  banco      String
+  agencia    String?
+  conta      String?
+  tipo       String?
+
+  locadora   Locadora    @relation(fields: [locadoraId], references: [id], onDelete: Cascade)
+  transacoes Transacao[]
+
+  @@index([locadoraId])
+  @@map("conta_bancaria")
+}
+
+model Veiculo {
+  id            String        @id @default(cuid())
+  locadoraId    String        @map("locadora_id")
+  tipo          TipoVeiculo
+  placa         String
+  renavam       String?
+  marca         String?
+  modelo        String?
+  ano           Int?
+  cor           String?
+  valorCompra   Decimal?      @map("valor_compra") @db.Decimal(12, 2)
+  valorFipe     Decimal?      @map("valor_fipe") @db.Decimal(12, 2)
+  kmAtual       Int?          @map("km_atual")
+  status        VeiculoStatus @default(disponivel)
+  dataAquisicao DateTime?     @map("data_aquisicao")
+  vendedor      String? // onde/de quem o veículo foi comprado
+  propria       Boolean       @default(true) // false = de investidor/terceiro
+  proprietario  String? // dono, quando não é própria (investidor) — texto livre
+  investidorId  String?       @map("investidor_id") // usuário investidor dono da moto
+  observacoes   String? // anotações/ocorrências
+  criadoEm      DateTime      @default(now()) @map("criado_em")
+
+  locadora   Locadora           @relation(fields: [locadoraId], references: [id], onDelete: Cascade)
+  investidor Usuario?           @relation("Investidor", fields: [investidorId], references: [id], onDelete: SetNull)
+  locacoes    Locacao[]
+  transacoes  Transacao[]
+  documentos  DocumentoVeiculo[]
+  manutencoes Manutencao[]
+
+  @@unique([locadoraId, placa])
+  @@index([locadoraId])
+  @@index([status])
+  @@index([investidorId])
+  @@map("veiculo")
+}
+
+model DocumentoVeiculo {
+  id        String   @id @default(cuid())
+  veiculoId String   @map("veiculo_id")
+  nome      String
+  chave     String
+  criadoEm  DateTime @default(now()) @map("criado_em")
+
+  veiculo Veiculo @relation(fields: [veiculoId], references: [id], onDelete: Cascade)
+
+  @@index([veiculoId])
+  @@map("documento_veiculo")
+}
+
+model Manutencao {
+  id            String           @id @default(cuid())
+  locadoraId    String           @map("locadora_id")
+  veiculoId     String           @map("veiculo_id")
+  data          DateTime
+  kmVeiculo     Int?             @map("km_veiculo")
+  oficina       String? // onde o serviço foi feito
+  descricao     String?
+  pecasServicos String?          @map("pecas_servicos")
+  valor         Decimal          @default(0) @db.Decimal(12, 2)
+  status        ManutencaoStatus @default(finalizada)
+  transacaoId   String?          @unique @map("transacao_id") // despesa vinculada
+  criadoEm      DateTime         @default(now()) @map("criado_em")
+
+  locadora   Locadora              @relation(fields: [locadoraId], references: [id], onDelete: Cascade)
+  veiculo    Veiculo               @relation(fields: [veiculoId], references: [id], onDelete: Cascade)
+  transacao  Transacao?            @relation(fields: [transacaoId], references: [id], onDelete: SetNull)
+  documentos DocumentoManutencao[]
+
+  @@index([locadoraId])
+  @@index([veiculoId])
+  @@index([data])
+  @@map("manutencao")
+}
+
+model DocumentoManutencao {
+  id           String   @id @default(cuid())
+  manutencaoId String   @map("manutencao_id")
+  nome         String
+  chave        String
+  criadoEm     DateTime @default(now()) @map("criado_em")
+
+  manutencao Manutencao @relation(fields: [manutencaoId], references: [id], onDelete: Cascade)
+
+  @@index([manutencaoId])
+  @@map("documento_manutencao")
+}
+
+model Cliente {
+  id             String        @id @default(cuid())
+  locadoraId     String        @map("locadora_id")
+  nome           String
+  cpf            String?
+  rg             String?
+  email          String?
+  telefone       String?
+  endereco       String? // legado (linha única) — mantido por compatibilidade
+  cep            String?
+  logradouro     String?
+  numero         String?
+  complemento    String?
+  bairro         String?
+  cidade         String?
+  estado         String? // UF
+  cnhNumero      String?       @map("cnh_numero")
+  cnhValidade    DateTime?     @map("cnh_validade")
+  dataNascimento DateTime?     @map("data_nascimento")
+  ref1Nome       String?       @map("ref1_nome")
+  ref1Telefone   String?       @map("ref1_telefone")
+  ref2Nome       String?       @map("ref2_nome")
+  ref2Telefone   String?       @map("ref2_telefone")
+  status         ClienteStatus @default(ativo)
+  criadoEm       DateTime      @default(now()) @map("criado_em")
+
+  locadora   Locadora           @relation(fields: [locadoraId], references: [id], onDelete: Cascade)
+  locacoes   Locacao[]
+  documentos DocumentoCliente[]
+
+  @@index([locadoraId])
+  @@index([cpf])
+  @@map("cliente")
+}
+
+model DocumentoCliente {
+  id        String   @id @default(cuid())
+  clienteId String   @map("cliente_id")
+  nome      String
+  chave     String // chave (key) do objeto no bucket S3
+  criadoEm  DateTime @default(now()) @map("criado_em")
+
+  cliente Cliente @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+
+  @@index([clienteId])
+  @@map("documento_cliente")
+}
+
+model Locacao {
+  id                 String              @id @default(cuid())
+  locadoraId         String              @map("locadora_id")
+  veiculoId          String              @map("veiculo_id")
+  clienteId          String              @map("cliente_id")
+  atendenteId        String?             @map("atendente_id")
+  valorCaucao        Decimal?            @map("valor_caucao") @db.Decimal(12, 2)
+  valorAluguel       Decimal             @map("valor_aluguel") @db.Decimal(12, 2)
+  multaAtraso        Decimal?            @map("multa_atraso") @db.Decimal(12, 2)
+  jurosMes           Decimal?            @map("juros_mes") @db.Decimal(6, 3)
+  dataInicio         DateTime            @map("data_inicio")
+  dataProximoPagamento DateTime?         @map("data_proximo_pagamento")
+  tempoMinimoDias    Int?                @map("tempo_minimo_dias")
+  frequenciaPagamento FrequenciaPagamento @default(mensal) @map("frequencia_pagamento")
+  localRetirada      String?             @map("local_retirada")
+  localDevolucao     String?             @map("local_devolucao")
+  kmEntrega          Int?                @map("km_entrega")
+  nivelCombustivel   String?             @map("nivel_combustivel")
+  franquiaKmDiaria   Int?                @map("franquia_km_diaria")
+  raioCirculacao     String?             @map("raio_circulacao")
+  seguroTerceiros    Boolean             @default(false) @map("seguro_terceiros")
+  promessaCompra     Boolean             @default(false) @map("promessa_compra")
+  caucaoPendente     Boolean             @default(false) @map("caucao_pendente")
+  caucaoParcelada    Boolean             @default(false) @map("caucao_parcelada")
+  status             LocacaoStatus       @default(ativa)
+  dataEncerramento   DateTime?           @map("data_encerramento")
+  criadoEm           DateTime            @default(now()) @map("criado_em")
+
+  locadora   Locadora    @relation(fields: [locadoraId], references: [id], onDelete: Cascade)
+  veiculo    Veiculo     @relation(fields: [veiculoId], references: [id])
+  cliente    Cliente     @relation(fields: [clienteId], references: [id])
+  atendente  Usuario?    @relation("AtendenteLocacao", fields: [atendenteId], references: [id])
+  transacoes Transacao[]
+
+  @@index([locadoraId])
+  @@index([status])
+  @@index([veiculoId])
+  @@index([clienteId])
+  @@map("locacao")
+}
+
+model Transacao {
+  id              String             @id @default(cuid())
+  locadoraId      String             @map("locadora_id")
+  locacaoId       String?            @map("locacao_id")
+  veiculoId       String?            @map("veiculo_id")
+  contaBancariaId String?            @map("conta_bancaria_id")
+  tipo            TipoTransacao
+  categoria       CategoriaTransacao
+  valor           Decimal            @db.Decimal(12, 2)
+  dataVencimento  DateTime?          @map("data_vencimento")
+  dataPagamento   DateTime?          @map("data_pagamento")
+  status          StatusTransacao    @default(pendente)
+  formaPagamento  FormaPagamento?    @map("forma_pagamento")
+  comprovanteUrl  String?            @map("comprovante_url")
+  observacao      String?
+  criadoEm        DateTime           @default(now()) @map("criado_em")
+
+  locadora      Locadora       @relation(fields: [locadoraId], references: [id], onDelete: Cascade)
+  locacao       Locacao?       @relation(fields: [locacaoId], references: [id], onDelete: SetNull)
+  veiculo       Veiculo?       @relation(fields: [veiculoId], references: [id], onDelete: SetNull)
+  contaBancaria ContaBancaria? @relation(fields: [contaBancariaId], references: [id], onDelete: SetNull)
+  manutencao    Manutencao?
+
+  @@index([locadoraId])
+  @@index([tipo])
+  @@index([status])
+  @@index([categoria])
+  @@index([locacaoId])
+  @@index([dataVencimento])
+  @@map("transacao")
+}
