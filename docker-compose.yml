@@ -1,0 +1,56 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: vibrato-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: vibrato
+      POSTGRES_PASSWORD: vibrato
+      POSTGRES_DB: vibrato
+    ports:
+      - "5433:5432"
+    volumes:
+      - vibrato-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vibrato"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Storage S3-compatível para desenvolvimento local.
+  # Em produção isto vira o Supabase Storage (mesmo SDK S3).
+  storage:
+    image: minio/minio:latest
+    container_name: vibrato-storage
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: vibrato
+      MINIO_ROOT_PASSWORD: vibrato123
+    ports:
+      - "9000:9000"   # API S3
+      - "9001:9001"   # Console web (http://localhost:9001)
+    volumes:
+      - vibrato-storage-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Cria o bucket inicial automaticamente quando o storage sobe.
+  storage-init:
+    image: minio/mc:latest
+    depends_on:
+      storage:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://storage:9000 vibrato vibrato123 &&
+      mc mb --ignore-existing local/vibrato &&
+      echo 'Bucket vibrato pronto.'
+      "
+
+volumes:
+  vibrato-db-data:
+  vibrato-storage-data:
