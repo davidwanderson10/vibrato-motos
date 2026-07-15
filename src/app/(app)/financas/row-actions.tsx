@@ -20,10 +20,12 @@ export function RowActions({
   transacao,
   contas,
   locacoes,
+  veiculos,
 }: {
   transacao: TransacaoDTO;
   contas: Opcao[];
   locacoes: Opcao[];
+  veiculos: Opcao[];
 }) {
   const [pending, start] = useTransition();
   const [confirmDel, setConfirmDel] = useState(false);
@@ -63,6 +65,7 @@ export function RowActions({
         transacao={transacao}
         contas={contas}
         locacoes={locacoes}
+        veiculos={veiculos}
       />
       <Button
         size="sm"

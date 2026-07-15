@@ -91,6 +91,7 @@ export default async function FinancasPage({
     where,
     include: {
       contaBancaria: { select: { banco: true } },
+      veiculo: { select: { placa: true } },
       locacao: {
         select: {
           cliente: { select: { nome: true } },
@@ -184,6 +185,7 @@ export default async function FinancasPage({
       where: { locadoraId: loc },
       select: {
         id: true,
+        veiculoId: true,
         cliente: { select: { nome: true } },
         veiculo: { select: { placa: true } },
       },
@@ -195,6 +197,11 @@ export default async function FinancasPage({
   const locacoesOpt = locacoes.map((l) => ({
     id: l.id,
     label: `${l.cliente.nome} · ${l.veiculo.placa}`,
+    veiculoId: l.veiculoId,
+  }));
+  const veiculosOpt = veiculos.map((v) => ({
+    id: v.id,
+    label: [v.placa, v.marca, v.modelo].filter(Boolean).join(" · "),
   }));
 
   return (
@@ -216,7 +223,11 @@ export default async function FinancasPage({
                     tipo: c.tipo,
                   }))}
                 />
-                <NovaTransacaoButton contas={contasOpt} locacoes={locacoesOpt} />
+                <NovaTransacaoButton
+                  contas={contasOpt}
+                  locacoes={locacoesOpt}
+                  veiculos={veiculosOpt}
+                />
               </>
             )}
           </div>
@@ -365,9 +376,16 @@ export default async function FinancasPage({
                 formaPagamento: t.formaPagamento,
                 contaBancariaId: t.contaBancariaId,
                 locacaoId: t.locacaoId,
+                veiculoId: t.veiculoId,
+                temComprovante: !!t.comprovanteUrl,
                 observacao: t.observacao,
               };
               const entrada = t.tipo === "entrada";
+              const vinculo = t.locacao
+                ? `${t.locacao.cliente.nome} · ${t.locacao.veiculo.placa}`
+                : t.veiculo
+                  ? t.veiculo.placa
+                  : "—";
               return (
                 <Tr key={t.id}>
                   <Td className="whitespace-nowrap">
@@ -400,11 +418,7 @@ export default async function FinancasPage({
                   </Td>
                   <Td>{t.formaPagamento ? formaPagamentoLabel[t.formaPagamento] : "—"}</Td>
                   <Td>{t.contaBancaria?.banco ?? "—"}</Td>
-                  <Td className="text-xs text-muted">
-                    {t.locacao
-                      ? `${t.locacao.cliente.nome} · ${t.locacao.veiculo.placa}`
-                      : "—"}
-                  </Td>
+                  <Td className="text-xs text-muted">{vinculo}</Td>
                   <Td>
                     <div className="flex items-center justify-end gap-1">
                       <ViewButton
@@ -417,7 +431,8 @@ export default async function FinancasPage({
                           { label: "Status", value: statusTransacaoLabel[t.status] },
                           { label: "Forma", value: t.formaPagamento ? formaPagamentoLabel[t.formaPagamento] : "—" },
                           { label: "Conta", value: t.contaBancaria?.banco },
-                          { label: "Vínculo", value: t.locacao ? `${t.locacao.cliente.nome} · ${t.locacao.veiculo.placa}` : "—" },
+                          { label: "Vínculo", value: vinculo },
+                          { label: "Comprovante", value: t.comprovanteUrl ? "Sim" : "—" },
                           { label: "Observação", value: t.observacao },
                         ]}
                       />
@@ -426,6 +441,7 @@ export default async function FinancasPage({
                           transacao={dto}
                           contas={contasOpt}
                           locacoes={locacoesOpt}
+                          veiculos={veiculosOpt}
                         />
                       )}
                     </div>
