@@ -8,7 +8,11 @@ export default defineConfig({
   migrations: {
     path: "prisma/migrations",
   },
+  // Migrations precisam de conexão DIRETA (session mode). Em produção use
+  // DIRECT_URL (Supabase: conexão direta, porta 5432). Runtime continua na
+  // Transaction pooler (6543) via DATABASE_URL no adapter (src/lib/prisma.ts).
+  // Local: DIRECT_URL não existe, cai no DATABASE_URL normalmente.
   datasource: {
-    url: process.env["DATABASE_URL"],
+    url: process.env["DIRECT_URL"] || process.env["DATABASE_URL"],
   },
 });
