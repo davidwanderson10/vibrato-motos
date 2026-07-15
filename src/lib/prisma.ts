@@ -7,7 +7,15 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 function createPrisma() {
-  const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+  // Em serverless (Vercel) cada instância abre seu próprio pool. Mantemos poucas
+  // conexões por instância e liberamos as ociosas rápido para não estourar o
+  // limite do pooler do Supabase. Use SEMPRE o Transaction pooler (porta 6543).
+  const adapter = new PrismaPg({
+    connectionString: process.env.DATABASE_URL,
+    max: Number(process.env.DB_POOL_MAX ?? 1),
+    idleTimeoutMillis: 10_000,
+    connectionTimeoutMillis: 10_000,
+  });
   return new PrismaClient({ adapter });
 }
 
