@@ -153,6 +153,7 @@ model Locadora {
   transacoes     Transacao[]
   contasBancarias ContaBancaria[]
   manutencoes    Manutencao[]
+  documentos     Documento[]
 
   @@map("locadora")
 }
@@ -219,6 +220,7 @@ model Veiculo {
   locacoes    Locacao[]
   transacoes  Transacao[]
   documentos  DocumentoVeiculo[]
+  documentosGerais Documento[]
   manutencoes Manutencao[]
 
   @@unique([locadoraId, placa])
@@ -277,6 +279,28 @@ model DocumentoManutencao {
 
   @@index([manutencaoId])
   @@map("documento_manutencao")
+}
+
+// Repositório central de documentos, com vínculo opcional a moto e/ou locação.
+// Usado pela página /documentos e pelos anexos da locação.
+model Documento {
+  id         String   @id @default(cuid())
+  locadoraId String   @map("locadora_id")
+  veiculoId  String?  @map("veiculo_id")
+  locacaoId  String?  @map("locacao_id")
+  nome       String
+  chave      String // chave (key) do objeto no bucket S3
+  descricao  String?
+  criadoEm   DateTime @default(now()) @map("criado_em")
+
+  locadora Locadora @relation(fields: [locadoraId], references: [id], onDelete: Cascade)
+  veiculo  Veiculo? @relation(fields: [veiculoId], references: [id], onDelete: SetNull)
+  locacao  Locacao? @relation(fields: [locacaoId], references: [id], onDelete: SetNull)
+
+  @@index([locadoraId])
+  @@index([veiculoId])
+  @@index([locacaoId])
+  @@map("documento")
 }
 
 model Cliente {
@@ -360,6 +384,7 @@ model Locacao {
   cliente    Cliente     @relation(fields: [clienteId], references: [id])
   atendente  Usuario?    @relation("AtendenteLocacao", fields: [atendenteId], references: [id])
   transacoes Transacao[]
+  documentos Documento[]
 
   @@index([locadoraId])
   @@index([status])

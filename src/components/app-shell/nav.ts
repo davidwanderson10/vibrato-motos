@@ -7,6 +7,7 @@ import {
   Wrench,
   Users,
   UserCog,
+  FolderArchive,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -27,6 +28,7 @@ export const navItems: NavItem[] = [
   { href: "/financas", label: "Finanças", icon: Wallet, key: "financas" },
   { href: "/manutencoes", label: "Manutenções", icon: Wrench, key: "manutencoes" },
   { href: "/clientes", label: "Clientes", icon: Users, key: "clientes" },
+  { href: "/documentos", label: "Documentos", icon: FolderArchive, key: "documentos" },
   { href: "/usuarios", label: "Usuários", icon: UserCog, key: "usuarios" },
   { href: "/configuracoes", label: "Configurações", icon: Settings, key: "configuracoes" },
 ];

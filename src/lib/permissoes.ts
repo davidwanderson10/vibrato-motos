@@ -9,6 +9,7 @@ export type Screen =
   | "financas"
   | "manutencoes"
   | "clientes"
+  | "documentos"
   | "usuarios"
   | "configuracoes";
 
@@ -18,6 +19,7 @@ export const INVESTIDOR_TELAS: Screen[] = [
   "frota",
   "locacoes",
   "financas",
+  "documentos",
 ];
 
 interface UsuarioLike {
