@@ -1,20 +1,37 @@
+import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireScreen } from "@/lib/auth";
 import { isInvestidor, porVeiculoWhere, veiculoWhere } from "@/lib/permissoes";
 import { PageHeader } from "@/components/app-shell/page-header";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/input";
 import { Table, Thead, Th, Tr, Td, EmptyState } from "@/components/ui/table";
 import { formatDate } from "@/lib/utils";
 import { UploadDocumentoButton, DocumentoRowActions } from "./documento-manager";
 
-export default async function DocumentosPage() {
+type SP = { moto?: string; locacao?: string };
+
+export default async function DocumentosPage({
+  searchParams,
+}: {
+  searchParams: Promise<SP>;
+}) {
   const usuario = await requireScreen("documentos");
   const investidor = isInvestidor(usuario);
   const loc = usuario.locadoraId;
+  const sp = await searchParams;
+
+  const where: Prisma.DocumentoWhereInput = {
+    locadoraId: loc,
+    ...porVeiculoWhere(usuario),
+  };
+  if (sp.moto) where.veiculoId = sp.moto;
+  if (sp.locacao) where.locacaoId = sp.locacao;
 
   const [documentos, veiculos, locacoes] = await Promise.all([
     prisma.documento.findMany({
-      where: { locadoraId: loc, ...porVeiculoWhere(usuario) },
+      where,
       include: {
         veiculo: { select: { placa: true } },
         locacao: {
@@ -63,6 +80,28 @@ export default async function DocumentosPage() {
           ) : undefined
         }
       />
+
+      <form className="mb-4 flex flex-wrap items-end gap-2">
+        <Select name="moto" defaultValue={sp.moto ?? ""} className="w-56">
+          <option value="">Todas as motos</option>
+          {veiculosOpt.map((v) => (
+            <option key={v.id} value={v.id}>
+              {v.label}
+            </option>
+          ))}
+        </Select>
+        <Select name="locacao" defaultValue={sp.locacao ?? ""} className="w-64">
+          <option value="">Todas as locações</option>
+          {locacoesOpt.map((l) => (
+            <option key={l.id} value={l.id}>
+              {l.label}
+            </option>
+          ))}
+        </Select>
+        <Button type="submit" variant="outline">
+          Filtrar
+        </Button>
+      </form>
 
       {documentos.length === 0 ? (
         <EmptyState>
