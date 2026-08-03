@@ -5,8 +5,45 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireStaff } from "@/lib/auth";
 import { parseDateOnly } from "@/lib/utils";
+import { uploadObject } from "@/lib/storage";
 
 export type LocacaoFormState = { ok?: boolean; error?: string } | undefined;
+
+const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
+const TIPOS_OK = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/heic",
+  "application/pdf",
+];
+
+/** Sobe os anexos do formulário (campo "anexos") como Documentos da locação. Best-effort. */
+async function salvarAnexosLocacao(
+  formData: FormData,
+  locadoraId: string,
+  locacaoId: string,
+  veiculoId: string,
+) {
+  const arquivos = formData
+    .getAll("anexos")
+    .filter((a): a is File => a instanceof File && a.size > 0);
+  for (const arquivo of arquivos) {
+    if (arquivo.size > MAX_BYTES) continue;
+    if (arquivo.type && !TIPOS_OK.includes(arquivo.type)) continue;
+    const safeName = arquivo.name.replace(/[^\w.\-]+/g, "_").slice(-80);
+    const chave = `documentos/${locadoraId}/${crypto.randomUUID()}-${safeName}`;
+    try {
+      const buffer = Buffer.from(await arquivo.arrayBuffer());
+      await uploadObject(chave, buffer, arquivo.type || undefined);
+      await prisma.documento.create({
+        data: { locadoraId, locacaoId, veiculoId, nome: arquivo.name, chave },
+      });
+    } catch {
+      // ignora falha de um anexo; não bloqueia a locação
+    }
+  }
+}
 
 const emptyToNull = (v: unknown) => (v === "" || v === undefined ? null : v);
 const numNull = z.preprocess(emptyToNull, z.coerce.number().nullable());
@@ -91,8 +128,9 @@ export async function createLocacao(
     ? parseDateOnly(d.dataProximoPagamento)
     : dataInicio;
 
+  let novaLocacaoId: string;
   try {
-    await prisma.$transaction(async (tx) => {
+    novaLocacaoId = await prisma.$transaction(async (tx) => {
       // Cliente: usa existente ou cria novo.
       let clienteId = d.clienteId;
       if (d.clienteMode === "novo") {
@@ -116,7 +154,7 @@ export async function createLocacao(
         if (!c) throw new Error("Cliente inválido");
       }
 
-      await tx.locacao.create({
+      const nova = await tx.locacao.create({
         data: {
           locadoraId: usuario.locadoraId,
           veiculoId: d.veiculoId,
@@ -151,6 +189,8 @@ export async function createLocacao(
           status: d.status === "agendada" ? "retirada_agendada" : "alugado",
         },
       });
+
+      return nova.id;
     });
   } catch (e) {
     return {
@@ -161,8 +201,12 @@ export async function createLocacao(
     };
   }
 
+  // Anexos (fora da transação — evita I/O de storage segurando conexão).
+  await salvarAnexosLocacao(formData, usuario.locadoraId, novaLocacaoId, d.veiculoId);
+
   revalidatePath("/locacoes");
   revalidatePath("/frota");
+  revalidatePath("/documentos");
   return { ok: true };
 }
 
@@ -288,8 +332,12 @@ export async function updateLocacao(
     return { error: "Não foi possível salvar a locação." };
   }
 
+  // Anexos novos (append).
+  await salvarAnexosLocacao(formData, usuario.locadoraId, d.id, d.veiculoId);
+
   revalidatePath("/locacoes");
   revalidatePath("/frota");
+  revalidatePath("/documentos");
   return { ok: true };
 }
 

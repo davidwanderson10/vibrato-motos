@@ -49,6 +49,10 @@ export default async function LocacoesPage({
     include: {
       cliente: { select: { nome: true } },
       veiculo: { select: { placa: true, marca: true, modelo: true } },
+      documentos: {
+        select: { id: true, nome: true },
+        orderBy: { criadoEm: "desc" },
+      },
     },
     orderBy: { dataInicio: "desc" },
   });
@@ -301,6 +305,7 @@ export default async function LocacoesPage({
                         caucaoPendente: l.caucaoPendente,
                         caucaoParcelada: l.caucaoParcelada,
                         status: l.status,
+                        anexos: l.documentos,
                       }}
                     />
                     {l.status !== "encerrada" && (

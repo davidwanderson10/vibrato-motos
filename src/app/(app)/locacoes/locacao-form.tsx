@@ -1,13 +1,14 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Pencil } from "lucide-react";
+import { Plus, Pencil, Upload, FileText, Trash2 } from "lucide-react";
 import {
   createLocacao,
   updateLocacao,
   type LocacaoFormState,
 } from "./actions";
+import { getDocumentoUrl, deleteDocumento } from "../documentos/actions";
 import { Button } from "@/components/ui/button";
 import { Input, Select, Field } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
@@ -16,6 +17,54 @@ import { cn } from "@/lib/utils";
 export interface Opcao {
   id: string;
   label: string;
+}
+
+export interface Anexo {
+  id: string;
+  nome: string;
+}
+
+/** Lista de anexos existentes de uma locação, com ver/excluir. */
+function AnexosExistentes({ inicial }: { inicial: Anexo[] }) {
+  const [itens, setItens] = useState(inicial);
+  const [pending, start] = useTransition();
+  if (itens.length === 0) return null;
+  return (
+    <ul className="mb-2 divide-y divide-border rounded-xl border border-border bg-surface">
+      {itens.map((a) => (
+        <li key={a.id} className="flex items-center gap-2 px-3 py-2">
+          <FileText className="h-4 w-4 shrink-0 text-muted" />
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() =>
+              start(async () => {
+                const res = await getDocumentoUrl(a.id);
+                if (res.url) window.open(res.url, "_blank", "noopener,noreferrer");
+              })
+            }
+            className="flex-1 truncate text-left text-sm text-brand hover:underline"
+          >
+            {a.nome}
+          </button>
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() =>
+              start(async () => {
+                await deleteDocumento(a.id);
+                setItens((xs) => xs.filter((x) => x.id !== a.id));
+              })
+            }
+            className="text-danger hover:opacity-70"
+            aria-label="Excluir anexo"
+          >
+            <Trash2 className="h-4 w-4" />
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 export interface LocacaoDTO {
@@ -42,6 +91,7 @@ export interface LocacaoDTO {
   caucaoPendente: boolean;
   caucaoParcelada: boolean;
   status: string;
+  anexos?: Anexo[];
 }
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
@@ -371,6 +421,23 @@ function LocacaoForm({
           Caução parcelada
         </label>
       </div>
+
+      <SectionTitle>Anexos</SectionTitle>
+      {isEdit && l?.anexos && <AnexosExistentes inicial={l.anexos} />}
+      <label className="flex cursor-pointer items-center gap-2 text-sm text-brand">
+        <Upload className="h-4 w-4" />
+        <span className="hover:underline">
+          {isEdit ? "Adicionar anexos" : "Anexar documentos"}
+        </span>
+        <input
+          type="file"
+          name="anexos"
+          multiple
+          accept="image/*,application/pdf"
+          className="text-xs text-muted file:mr-2 file:rounded file:border file:border-border file:bg-surface file:px-2 file:py-1"
+        />
+      </label>
+      <p className="mt-1 text-xs text-muted">Imagem ou PDF, até 10 MB cada.</p>
 
       {state?.error && (
         <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-danger">
