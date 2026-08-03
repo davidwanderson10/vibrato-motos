@@ -46,7 +46,7 @@ export default async function DashboardPage({
     orderBy: { placa: "asc" },
   });
 
-  const [veiculos, locAtivas, locEncerradas, entradas, equipe] =
+  const [veiculos, locAtivas, locEncerradas, movimentos, equipe] =
     await Promise.all([
       prisma.veiculo.findMany({
         where: { locadoraId: loc, ...escopoV, ...filtroVeic },
@@ -66,13 +66,12 @@ export default async function DashboardPage({
       prisma.transacao.findMany({
         where: {
           locadoraId: loc,
-          tipo: "entrada",
           status: "pago",
           dataPagamento: { gte: inicio12 },
           ...escopoL,
           ...filtroPorVeic,
         },
-        select: { valor: true, dataPagamento: true },
+        select: { valor: true, dataPagamento: true, tipo: true },
       }),
       investidor
         ? Promise.resolve([])
@@ -130,22 +129,25 @@ export default async function DashboardPage({
   }
   const modelos = [...porModelo.entries()].sort((a, b) => b[1] - a[1]);
 
-  // Entradas 12 meses
+  // Entradas x Saídas — 12 meses
   const meses = Array.from({ length: 12 }, (_, i) => {
     const d = subMonths(now, 11 - i);
     return { key: format(d, "yyyy-MM"), label: format(d, "MMM/yy", { locale: ptBR }) };
   });
-  const bucket = new Map(meses.map((m) => [m.key, 0]));
-  for (const e of entradas) {
+  const bucketEnt = new Map(meses.map((m) => [m.key, 0]));
+  const bucketSai = new Map(meses.map((m) => [m.key, 0]));
+  for (const e of movimentos) {
     if (!e.dataPagamento) continue;
     const k = format(e.dataPagamento, "yyyy-MM");
+    const bucket = e.tipo === "entrada" ? bucketEnt : bucketSai;
     if (bucket.has(k)) bucket.set(k, bucket.get(k)! + Number(e.valor));
   }
   const chartData: PontoMes[] = meses.map((m) => ({
     mes: m.label,
-    valor: bucket.get(m.key)!,
+    entrada: bucketEnt.get(m.key)!,
+    saida: bucketSai.get(m.key)!,
   }));
-  const faturamentoMes = bucket.get(format(now, "yyyy-MM")) ?? 0;
+  const faturamentoMes = bucketEnt.get(format(now, "yyyy-MM")) ?? 0;
 
   return (
     <>
@@ -166,7 +168,7 @@ export default async function DashboardPage({
 
       <Card className="mb-6">
         <CardHeader>
-          <CardTitle>Entradas dos últimos 12 meses</CardTitle>
+          <CardTitle>Entradas e saídas dos últimos 12 meses</CardTitle>
         </CardHeader>
         <CardContent>
           <EntradasChart data={chartData} />

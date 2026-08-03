@@ -6,14 +6,19 @@ import {
   XAxis,
   YAxis,
   Tooltip,
+  Legend,
   ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
 
 export interface PontoMes {
   mes: string;
-  valor: number;
+  entrada: number;
+  saida: number;
 }
+
+const brl = (v: number) =>
+  v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
 export function EntradasChart({ data }: { data: PontoMes[] }) {
   return (
@@ -41,13 +46,7 @@ export function EntradasChart({ data }: { data: PontoMes[] }) {
             }
           />
           <Tooltip
-            formatter={(v) => [
-              (v as number).toLocaleString("pt-BR", {
-                style: "currency",
-                currency: "BRL",
-              }),
-              "Entradas",
-            ]}
+            formatter={(v, name) => [brl(v as number), name === "entrada" ? "Entradas" : "Saídas"]}
             labelStyle={{ color: "#14181f" }}
             contentStyle={{
               borderRadius: 8,
@@ -55,7 +54,12 @@ export function EntradasChart({ data }: { data: PontoMes[] }) {
               fontSize: 13,
             }}
           />
-          <Bar dataKey="valor" fill="#bf0000" radius={[4, 4, 0, 0]} />
+          <Legend
+            formatter={(value) => (value === "entrada" ? "Entradas" : "Saídas")}
+            wrapperStyle={{ fontSize: 13 }}
+          />
+          <Bar dataKey="entrada" name="entrada" fill="#16a34a" radius={[4, 4, 0, 0]} />
+          <Bar dataKey="saida" name="saida" fill="#bf0000" radius={[4, 4, 0, 0]} />
         </BarChart>
       </ResponsiveContainer>
     </div>

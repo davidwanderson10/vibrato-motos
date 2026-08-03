@@ -1,4 +1,4 @@
-import { subDays } from "date-fns";
+import { startOfMonth, startOfDay, endOfDay, format } from "date-fns";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireScreen } from "@/lib/auth";
@@ -55,22 +55,31 @@ export default async function FinancasPage({
   const sp = await searchParams;
   const loc = usuario.locadoraId;
 
-  const dias = [30, 60, 90].includes(Number(sp.dias)) ? Number(sp.dias) : 30;
+  const now = new Date();
+  // Período padrão: 1º dia do mês corrente → hoje. O usuário pode alterar.
+  const deStr = sp.de || format(startOfMonth(now), "yyyy-MM-dd");
+  const ateStr = sp.ate || format(now, "yyyy-MM-dd");
+  const deDate = startOfDay(parseDateOnly(deStr));
+  const ateDate = endOfDay(parseDateOnly(ateStr));
+  const periodoWhere = { gte: deDate, lte: ateDate };
 
   const motosSel = (sp.motos ?? "").split(",").filter(Boolean);
   const motoFilter = motosSel.length ? { veiculoId: { in: motosSel } } : {};
 
-  // Query string dos filtros atuais para o export.
+  // Query string dos filtros atuais para o export (usa o período efetivo).
   const exportQs = new URLSearchParams();
-  for (const k of ["tipo", "status", "forma", "de", "ate", "motos"] as const) {
+  for (const k of ["tipo", "status", "forma", "motos"] as const) {
     if (sp[k]) exportQs.set(k, sp[k] as string);
   }
+  exportQs.set("de", deStr);
+  exportQs.set("ate", ateStr);
 
-  // ---- Filtros do histórico ----
+  // ---- Filtros da LISTA de lançamentos (tipo/status/forma só valem aqui) ----
   const where: Prisma.TransacaoWhereInput = {
     locadoraId: loc,
     ...escopo,
     ...motoFilter,
+    dataVencimento: periodoWhere,
   };
   if (sp.tipo === "entrada" || sp.tipo === "saida") where.tipo = sp.tipo;
   if (["pendente", "pago", "cancelado"].includes(sp.status ?? ""))
@@ -81,11 +90,6 @@ export default async function FinancasPage({
     )
   )
     where.formaPagamento = sp.forma as never;
-  if (sp.de || sp.ate) {
-    where.dataVencimento = {};
-    if (sp.de) where.dataVencimento.gte = parseDateOnly(sp.de);
-    if (sp.ate) where.dataVencimento.lte = parseDateOnly(sp.ate);
-  }
 
   const transacoes = await prisma.transacao.findMany({
     where,
@@ -103,16 +107,17 @@ export default async function FinancasPage({
     take: 300,
   });
 
-  // ---- Indicadores (realizados no período) ----
-  const desde = subDays(new Date(), dias);
+  // ---- Indicadores ----
+  // Realizados (entradas/saídas): pagos com data de pagamento no período.
+  // A receber / a pagar: todo o pendente (independe de data).
   const [entradasAgg, saidasAgg, aReceberAgg, aPagarAgg] = await Promise.all([
     prisma.transacao.aggregate({
       _sum: { valor: true },
-      where: { locadoraId: loc, tipo: "entrada", status: "pago", dataPagamento: { gte: desde }, ...escopo, ...motoFilter },
+      where: { locadoraId: loc, tipo: "entrada", status: "pago", dataPagamento: periodoWhere, ...escopo, ...motoFilter },
     }),
     prisma.transacao.aggregate({
       _sum: { valor: true },
-      where: { locadoraId: loc, tipo: "saida", status: "pago", dataPagamento: { gte: desde }, ...escopo, ...motoFilter },
+      where: { locadoraId: loc, tipo: "saida", status: "pago", dataPagamento: periodoWhere, ...escopo, ...motoFilter },
     }),
     prisma.transacao.aggregate({
       _sum: { valor: true },
@@ -142,7 +147,7 @@ export default async function FinancasPage({
     where: {
       locadoraId: loc,
       status: "pago",
-      dataPagamento: { gte: desde },
+      dataPagamento: periodoWhere,
       veiculoId: { not: null },
       ...escopo,
       ...motoFilter,
@@ -236,12 +241,12 @@ export default async function FinancasPage({
 
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <StatCard
-          label={`Entradas (${dias}d)`}
+          label="Entradas (período)"
           value={formatBRL(entradas)}
           accent="success"
         />
         <StatCard
-          label={`Saídas (${dias}d)`}
+          label="Saídas (período)"
           value={formatBRL(saidas)}
           accent="danger"
         />
@@ -266,7 +271,7 @@ export default async function FinancasPage({
       {resultadoPorVeiculo.length > 0 && (
         <div className="mb-6">
           <h3 className="mb-2 text-sm font-semibold text-muted">
-            Resultado por veículo ({dias} dias) — ordenado por lucro
+            Resultado por veículo (período) — ordenado por lucro
           </h3>
           <Table>
             <Thead>
@@ -327,13 +332,14 @@ export default async function FinancasPage({
             </option>
           ))}
         </Select>
-        <Input type="date" name="de" defaultValue={sp.de ?? ""} className="w-40" />
-        <Input type="date" name="ate" defaultValue={sp.ate ?? ""} className="w-40" />
-        <Select name="dias" defaultValue={String(dias)} className="w-40">
-          <option value="30">Indicadores: 30d</option>
-          <option value="60">Indicadores: 60d</option>
-          <option value="90">Indicadores: 90d</option>
-        </Select>
+        <label className="flex flex-col text-xs text-muted">
+          De
+          <Input type="date" name="de" defaultValue={deStr} className="w-40" />
+        </label>
+        <label className="flex flex-col text-xs text-muted">
+          Até
+          <Input type="date" name="ate" defaultValue={ateStr} className="w-40" />
+        </label>
         <Button type="submit" variant="outline">
           Filtrar
         </Button>
