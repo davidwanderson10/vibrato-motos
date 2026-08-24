@@ -18,9 +18,13 @@ function diaRange(dia: string) {
   return { inicio, fim: addDays(inicio, 1) };
 }
 
-/** Marca (ou atualiza) o pagamento de uma ocorrência de despesa recorrente. */
+/**
+ * Marca (ou atualiza) o pagamento de uma ocorrência de despesa recorrente.
+ * `veiculoId` distingue as linhas por moto (modo percentual). Pode ser null.
+ */
 export async function pagarDespesa(
   despesaId: string,
+  veiculoId: string | null,
   dia: string, // yyyy-mm-dd (vencimento esperado)
   valor: number,
   dataPagamento: string | null,
@@ -31,9 +35,18 @@ export async function pagarDespesa(
 
   const despesa = await prisma.despesaRecorrente.findFirst({
     where: { id: despesaId, locadoraId: usuario.locadoraId },
-    select: { id: true, categoria: true, veiculoId: true, contaBancariaId: true },
+    select: { id: true, categoria: true, contaBancariaId: true },
   });
   if (!despesa) return;
+
+  // Valida a moto (quando informada).
+  if (veiculoId) {
+    const v = await prisma.veiculo.findFirst({
+      where: { id: veiculoId, locadoraId: usuario.locadoraId },
+      select: { id: true },
+    });
+    if (!v) return;
+  }
 
   const valorFinal = Number.isFinite(valor) && valor >= 0 ? valor : 0;
   const forma =
@@ -45,6 +58,7 @@ export async function pagarDespesa(
     where: {
       locadoraId: usuario.locadoraId,
       despesaRecorrenteId: despesaId,
+      veiculoId: veiculoId ?? null,
       dataVencimento: { gte: inicio, lt: fim },
     },
     select: { id: true },
@@ -65,7 +79,7 @@ export async function pagarDespesa(
       data: {
         locadoraId: usuario.locadoraId,
         despesaRecorrenteId: despesaId,
-        veiculoId: despesa.veiculoId,
+        veiculoId: veiculoId ?? null,
         contaBancariaId: despesa.contaBancariaId,
         tipo: "saida",
         categoria: despesa.categoria,
@@ -80,13 +94,18 @@ export async function pagarDespesa(
 }
 
 /** Desmarca o pagamento de uma ocorrência (volta a pendente). */
-export async function desmarcarDespesa(despesaId: string, dia: string) {
+export async function desmarcarDespesa(
+  despesaId: string,
+  veiculoId: string | null,
+  dia: string,
+) {
   const usuario = await requireStaff();
   const { inicio, fim } = diaRange(dia);
   await prisma.transacao.deleteMany({
     where: {
       locadoraId: usuario.locadoraId,
       despesaRecorrenteId: despesaId,
+      veiculoId: veiculoId ?? null,
       dataVencimento: { gte: inicio, lt: fim },
     },
   });
@@ -98,24 +117,36 @@ export async function desmarcarDespesa(despesaId: string, dia: string) {
 
 const emptyToNull = (v: unknown) => (v === "" || v === undefined ? null : v);
 const strNull = z.preprocess(emptyToNull, z.string().nullable());
+const numNull = z.preprocess(emptyToNull, z.coerce.number().nullable());
 
-const schema = z.object({
-  id: strNull,
-  categoria: z
-    .string()
-    .refine((c) => c in categoriaSaidaLabel, "Categoria inválida"),
-  descricao: strNull,
-  valor: z.coerce.number().min(0, "Informe o valor"),
-  frequencia: z.enum(["diario", "semanal", "quinzenal", "mensal"]),
-  primeiraData: z.string().min(1, "Informe a data do 1º vencimento"),
-  veiculoId: strNull,
-  contaBancariaId: strNull,
-  formaPagamento: z.preprocess(
-    emptyToNull,
-    z.string().nullable().refine((f) => f === null || FORMAS.includes(f), "Forma inválida"),
-  ),
-  ativa: z.preprocess((v) => v === "on" || v === "true" || v === "1", z.boolean()),
-});
+const schema = z
+  .object({
+    id: strNull,
+    tipoValor: z.enum(["fixo", "percentual"]),
+    categoria: z
+      .string()
+      .refine((c) => c in categoriaSaidaLabel, "Categoria inválida"),
+    descricao: strNull,
+    valor: numNull,
+    percentual: numNull,
+    frequencia: z.enum(["diario", "semanal", "quinzenal", "mensal"]),
+    primeiraData: z.string().min(1, "Informe a data do 1º vencimento"),
+    veiculoId: strNull,
+    contaBancariaId: strNull,
+    formaPagamento: z.preprocess(
+      emptyToNull,
+      z.string().nullable().refine((f) => f === null || FORMAS.includes(f), "Forma inválida"),
+    ),
+    ativa: z.preprocess((v) => v === "on" || v === "true" || v === "1", z.boolean()),
+  })
+  .refine((d) => d.tipoValor !== "fixo" || (d.valor ?? 0) > 0, {
+    message: "Informe o valor",
+    path: ["valor"],
+  })
+  .refine((d) => d.tipoValor !== "percentual" || (d.percentual ?? 0) > 0, {
+    message: "Informe o percentual (ex.: 6)",
+    path: ["percentual"],
+  });
 
 export async function saveDespesa(
   _prev: DespesaFormState,
@@ -128,9 +159,10 @@ export async function saveDespesa(
     return { error: parsed.error.issues[0]?.message ?? "Dados inválidos" };
   }
   const d = parsed.data;
+  const isPct = d.tipoValor === "percentual";
 
-  // Valida vínculos.
-  if (d.veiculoId) {
+  // Valida vínculos (moto só no modo fixo; percentual aplica a todas).
+  if (!isPct && d.veiculoId) {
     const v = await prisma.veiculo.findFirst({
       where: { id: d.veiculoId, locadoraId: usuario.locadoraId },
       select: { id: true },
@@ -148,10 +180,13 @@ export async function saveDespesa(
   const data = {
     categoria: d.categoria as never,
     descricao: d.descricao,
-    valor: d.valor,
-    frequencia: d.frequencia,
+    tipoValor: d.tipoValor,
+    valor: isPct ? 0 : (d.valor ?? 0),
+    percentual: isPct ? (d.percentual ?? 0) : null,
+    // Percentual é sempre mensal e aplica a todas as motos.
+    frequencia: isPct ? ("mensal" as const) : d.frequencia,
     primeiraData: parseDateOnly(d.primeiraData),
-    veiculoId: d.veiculoId,
+    veiculoId: isPct ? null : d.veiculoId,
     contaBancariaId: d.contaBancariaId,
     formaPagamento: (d.formaPagamento ?? null) as never,
     ativa: d.ativa,

@@ -63,6 +63,12 @@ enum FrequenciaPagamento {
   mensal
 }
 
+// Como o valor de uma despesa recorrente é definido.
+enum TipoValorDespesa {
+  fixo        // valor em R$ fixo
+  percentual  // % do faturamento (aluguéis) de cada moto no mês
+}
+
 enum LocacaoStatus {
   ativa
   encerrada
@@ -440,7 +446,9 @@ model DespesaRecorrente {
   contaBancariaId String?             @map("conta_bancaria_id")
   categoria       CategoriaTransacao
   descricao       String?
-  valor           Decimal             @db.Decimal(12, 2)
+  tipoValor       TipoValorDespesa    @default(fixo) @map("tipo_valor")
+  valor           Decimal             @default(0) @db.Decimal(12, 2) // usado no modo fixo
+  percentual      Decimal?            @db.Decimal(6, 3) // usado no modo percentual (ex.: 6.000)
   frequencia      FrequenciaPagamento @default(mensal)
   primeiraData    DateTime            @map("primeira_data") // âncora do 1º vencimento
   formaPagamento  FormaPagamento?     @map("forma_pagamento")

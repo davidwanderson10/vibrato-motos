@@ -16,9 +16,11 @@ export interface Opcao {
 
 export interface DespesaDTO {
   id: string;
+  tipoValor: string; // "fixo" | "percentual"
   categoria: string;
   descricao: string | null;
   valor: string;
+  percentual: string | null;
   frequencia: string;
   primeiraData: string; // yyyy-mm-dd
   veiculoId: string | null;
@@ -45,6 +47,7 @@ function DespesaForm({
     undefined,
   );
   const d = despesa;
+  const [tipo, setTipo] = useState<string>(d?.tipoValor ?? "fixo");
 
   useEffect(() => {
     if (state?.ok) {
@@ -56,6 +59,25 @@ function DespesaForm({
   return (
     <form action={formAction}>
       {isEdit && <input type="hidden" name="id" value={d!.id} />}
+
+      {/* Tipo de valor */}
+      <div className="mb-3 inline-flex overflow-hidden rounded-lg border border-border">
+        {(["fixo", "percentual"] as const).map((op) => (
+          <button
+            key={op}
+            type="button"
+            onClick={() => setTipo(op)}
+            className={
+              "px-4 py-1.5 text-sm font-medium " +
+              (tipo === op ? "bg-brand text-brand-fg" : "bg-surface text-muted") +
+              (op === "percentual" ? " border-l border-border" : "")
+            }
+          >
+            {op === "fixo" ? "Valor fixo" : "% do faturamento"}
+          </button>
+        ))}
+      </div>
+      <input type="hidden" name="tipoValor" value={tipo} />
 
       <div className="grid grid-cols-2 gap-3">
         <Field label="Categoria" htmlFor="categoria">
@@ -70,68 +92,126 @@ function DespesaForm({
             ))}
           </Select>
         </Field>
-        <Field label="Valor (R$)" htmlFor="valor">
-          <Input
-            id="valor"
-            name="valor"
-            type="number"
-            step="0.01"
-            required
-            defaultValue={d?.valor ?? ""}
-          />
-        </Field>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Frequência" htmlFor="frequencia">
-          <Select id="frequencia" name="frequencia" defaultValue={d?.frequencia ?? "mensal"}>
-            <option value="diario">Diária</option>
-            <option value="semanal">Semanal</option>
-            <option value="quinzenal">Quinzenal</option>
-            <option value="mensal">Mensal</option>
-          </Select>
-        </Field>
-        <Field
-          label="1º vencimento"
-          htmlFor="primeiraData"
-          hint="A recorrência parte desta data. Ex.: dia 15 → todo dia 15."
-        >
-          <Input
-            id="primeiraData"
-            name="primeiraData"
-            type="date"
-            required
-            defaultValue={d?.primeiraData ?? ""}
-          />
-        </Field>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Vincular a uma moto (opcional)" htmlFor="veiculoId">
-          <Select id="veiculoId" name="veiculoId" defaultValue={d?.veiculoId ?? ""}>
-            <option value="">—</option>
-            {veiculos.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Conta bancária (opcional)" htmlFor="contaBancariaId">
-          <Select
-            id="contaBancariaId"
-            name="contaBancariaId"
-            defaultValue={d?.contaBancariaId ?? ""}
+        {tipo === "fixo" ? (
+          <Field label="Valor (R$)" htmlFor="valor">
+            <Input
+              id="valor"
+              name="valor"
+              type="number"
+              step="0.01"
+              defaultValue={d?.valor ?? ""}
+            />
+          </Field>
+        ) : (
+          <Field
+            label="Percentual (%)"
+            htmlFor="percentual"
+            hint="Ex.: 6 = 6% dos aluguéis recebidos de cada moto no mês."
           >
-            <option value="">—</option>
-            {contas.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
+            <Input
+              id="percentual"
+              name="percentual"
+              type="number"
+              step="0.001"
+              placeholder="6"
+              defaultValue={d?.percentual ?? ""}
+            />
+          </Field>
+        )}
       </div>
+
+      {tipo === "fixo" ? (
+        <div className="grid grid-cols-2 gap-3">
+          <Field
+            label="1º vencimento"
+            htmlFor="primeiraData"
+            hint="A recorrência parte desta data. Ex.: dia 15 → todo dia 15."
+          >
+            <Input
+              id="primeiraData"
+              name="primeiraData"
+              type="date"
+              required
+              defaultValue={d?.primeiraData ?? ""}
+            />
+          </Field>
+          <Field label="Frequência" htmlFor="frequencia">
+            <Select id="frequencia" name="frequencia" defaultValue={d?.frequencia ?? "mensal"}>
+              <option value="diario">Diária</option>
+              <option value="semanal">Semanal</option>
+              <option value="quinzenal">Quinzenal</option>
+              <option value="mensal">Mensal</option>
+            </Select>
+          </Field>
+        </div>
+      ) : (
+        <>
+          <Field
+            label="Dia do vencimento (mensal)"
+            htmlFor="primeiraData"
+            hint="Dia em que o imposto vence a cada mês. Calculado sobre os aluguéis do mês."
+          >
+            <Input
+              id="primeiraData"
+              name="primeiraData"
+              type="date"
+              required
+              defaultValue={d?.primeiraData ?? ""}
+            />
+          </Field>
+          <input type="hidden" name="frequencia" value="mensal" />
+        </>
+      )}
+
+      {tipo === "fixo" ? (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Vincular a uma moto (opcional)" htmlFor="veiculoId">
+            <Select id="veiculoId" name="veiculoId" defaultValue={d?.veiculoId ?? ""}>
+              <option value="">—</option>
+              {veiculos.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Conta bancária (opcional)" htmlFor="contaBancariaId">
+            <Select
+              id="contaBancariaId"
+              name="contaBancariaId"
+              defaultValue={d?.contaBancariaId ?? ""}
+            >
+              <option value="">—</option>
+              {contas.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+      ) : (
+        <>
+          <p className="mb-3 rounded-lg bg-background px-3 py-2 text-xs text-muted">
+            Aplica a <strong>todas as motos</strong> automaticamente — gera 1 linha
+            por moto que teve aluguel no mês (cai no resultado por veículo).
+          </p>
+          <Field label="Conta bancária (opcional)" htmlFor="contaBancariaId">
+            <Select
+              id="contaBancariaId"
+              name="contaBancariaId"
+              defaultValue={d?.contaBancariaId ?? ""}
+            >
+              <option value="">—</option>
+              {contas.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         <Field label="Forma de pagamento (opcional)" htmlFor="formaPagamento">

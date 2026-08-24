@@ -12,6 +12,7 @@ import { NovaDespesaButton, DespesaRowActions, type DespesaDTO } from "./despesa
 
 interface DItem {
   despesaId: string;
+  veiculoId: string | null;
   dia: string;
   pago: boolean;
   titulo: string;
@@ -35,17 +36,37 @@ export async function DespesasView({
   const inicioMes = startOfMonth(mesDate);
   const fimMes = endOfMonth(mesDate);
 
-  const [despesas, contas] = await Promise.all([
+  const [despesas, contas, veiculos, receitaGrupos] = await Promise.all([
     prisma.despesaRecorrente.findMany({
       where: { locadoraId },
       include: { veiculo: { select: { placa: true } } },
       orderBy: { criadoEm: "desc" },
     }),
-    prisma.contaBancaria.findMany({
+    prisma.contaBancaria.findMany({ where: { locadoraId }, orderBy: { banco: "asc" } }),
+    prisma.veiculo.findMany({
       where: { locadoraId },
-      orderBy: { banco: "asc" },
+      select: { id: true, placa: true, marca: true, modelo: true },
+      orderBy: { placa: "asc" },
+    }),
+    // Faturamento (aluguéis recebidos) por moto no mês — base do modo percentual.
+    prisma.transacao.groupBy({
+      by: ["veiculoId"],
+      _sum: { valor: true },
+      where: {
+        locadoraId,
+        categoria: "aluguel",
+        status: "pago",
+        dataPagamento: { gte: inicioMes, lte: fimMes },
+        veiculoId: { not: null },
+      },
     }),
   ]);
+
+  const placaPorMoto = new Map(veiculos.map((v) => [v.id, v.placa]));
+  const receitaPorMoto = new Map<string, number>();
+  for (const g of receitaGrupos) {
+    if (g.veiculoId) receitaPorMoto.set(g.veiculoId, Number(g._sum.valor ?? 0));
+  }
 
   // Pagamentos já lançados no mês (vinculados a despesas recorrentes).
   const pagos = await prisma.transacao.findMany({
@@ -56,6 +77,7 @@ export async function DespesasView({
     },
     select: {
       despesaRecorrenteId: true,
+      veiculoId: true,
       dataVencimento: true,
       valor: true,
       dataPagamento: true,
@@ -67,9 +89,11 @@ export async function DespesasView({
     string,
     { valor: string; data: string | null; forma: string | null; obs: string | null }
   >();
+  const keyOf = (despesaId: string, veiculoId: string | null, dia: string) =>
+    `${despesaId}|${veiculoId ?? ""}|${dia}`;
   for (const p of pagos) {
     if (!p.despesaRecorrenteId || !p.dataVencimento) continue;
-    pagosMap.set(`${p.despesaRecorrenteId}|${chaveDia(p.dataVencimento)}`, {
+    pagosMap.set(keyOf(p.despesaRecorrenteId, p.veiculoId, chaveDia(p.dataVencimento)), {
       valor: p.valor.toString(),
       data: p.dataPagamento ? chaveDia(p.dataPagamento) : null,
       forma: p.formaPagamento,
@@ -79,10 +103,33 @@ export async function DespesasView({
 
   // Gera as ocorrências esperadas do mês (só das despesas ativas).
   const itens: DItem[] = [];
+  const pushItem = (
+    despesaId: string,
+    veiculoId: string | null,
+    dia: string,
+    titulo: string,
+    veicPlaca: string | null,
+    valorEsperado: number,
+  ) => {
+    const pg = pagosMap.get(keyOf(despesaId, veiculoId, dia));
+    itens.push({
+      despesaId,
+      veiculoId,
+      dia,
+      pago: !!pg,
+      titulo,
+      veicPlaca,
+      valorEsperado: valorEsperado.toFixed(2),
+      pagoValor: pg?.valor ?? null,
+      pagoData: pg?.data ?? null,
+      pagoForma: pg?.forma ?? null,
+      pagoObs: pg?.obs ?? null,
+    });
+  };
+
   for (const d of despesas) {
     if (!d.ativa) continue;
     const catLabel = categoriaLabel[d.categoria] ?? d.categoria;
-    const titulo = d.veiculo ? `${catLabel} · ${d.veiculo.placa}` : catLabel;
     const dues = datasVencimento(
       d.primeiraData,
       d.frequencia as Frequencia,
@@ -91,22 +138,28 @@ export async function DespesasView({
     );
     for (const dd of dues) {
       const dia = chaveDia(dd);
-      const pg = pagosMap.get(`${d.id}|${dia}`);
-      itens.push({
-        despesaId: d.id,
-        dia,
-        pago: !!pg,
-        titulo,
-        veicPlaca: d.veiculo?.placa ?? null,
-        valorEsperado: d.valor.toString(),
-        pagoValor: pg?.valor ?? null,
-        pagoData: pg?.data ?? null,
-        pagoForma: pg?.forma ?? null,
-        pagoObs: pg?.obs ?? null,
-      });
+      if (d.tipoValor === "percentual") {
+        // Uma linha por moto que teve aluguel no mês.
+        const pct = Number(d.percentual ?? 0) / 100;
+        for (const [motoId, receita] of receitaPorMoto) {
+          if (receita <= 0) continue;
+          const placa = placaPorMoto.get(motoId) ?? null;
+          pushItem(d.id, motoId, dia, `${catLabel} · ${placa ?? ""}`, placa, receita * pct);
+        }
+      } else {
+        const placa = d.veiculo?.placa ?? null;
+        pushItem(
+          d.id,
+          d.veiculoId,
+          dia,
+          placa ? `${catLabel} · ${placa}` : catLabel,
+          placa,
+          Number(d.valor),
+        );
+      }
     }
   }
-  itens.sort((a, b) => a.dia.localeCompare(b.dia));
+  itens.sort((a, b) => a.dia.localeCompare(b.dia) || a.titulo.localeCompare(b.titulo));
 
   const totalEsperado = itens.reduce((s, i) => s + Number(i.valorEsperado), 0);
   const totalPago = itens
@@ -116,13 +169,7 @@ export async function DespesasView({
     .filter((i) => !i.pago)
     .reduce((s, i) => s + Number(i.valorEsperado), 0);
 
-  const veiculosOpt = (
-    await prisma.veiculo.findMany({
-      where: { locadoraId },
-      select: { id: true, placa: true, marca: true, modelo: true },
-      orderBy: { placa: "asc" },
-    })
-  ).map((v) => ({
+  const veiculosOpt = veiculos.map((v) => ({
     id: v.id,
     label: [v.placa, v.marca, v.modelo].filter(Boolean).join(" · "),
   }));
@@ -131,7 +178,9 @@ export async function DespesasView({
   const chips = new Map<string, React.ReactNode[]>();
   for (const i of itens) {
     const arr = chips.get(i.dia) ?? [];
-    arr.push(<PagarDespesa key={`${i.despesaId}-${i.dia}`} {...i} variant="chip" />);
+    arr.push(
+      <PagarDespesa key={`${i.despesaId}-${i.veiculoId ?? ""}-${i.dia}`} {...i} variant="chip" />,
+    );
     chips.set(i.dia, arr);
   }
 
@@ -155,7 +204,7 @@ export async function DespesasView({
         <EmptyState>
           Nenhuma despesa recorrente para este mês. Clique em{" "}
           <strong>Nova despesa recorrente</strong> para cadastrar (ex.: seguro
-          todo dia 15).
+          todo dia 15, ou imposto de 6% dos aluguéis).
         </EmptyState>
       ) : view === "lista" ? (
         <Table>
@@ -172,7 +221,7 @@ export async function DespesasView({
             {itens.map((i) => {
               const [y, m, d] = i.dia.split("-");
               return (
-                <Tr key={`${i.despesaId}-${i.dia}`}>
+                <Tr key={`${i.despesaId}-${i.veiculoId ?? ""}-${i.dia}`}>
                   <Td className="whitespace-nowrap">{`${d}/${m}/${y}`}</Td>
                   <Td className="font-medium">{i.titulo}</Td>
                   <Td>{i.veicPlaca ?? "—"}</Td>
@@ -211,11 +260,14 @@ export async function DespesasView({
           </Thead>
           <tbody>
             {despesas.map((d) => {
+              const isPct = d.tipoValor === "percentual";
               const dto: DespesaDTO = {
                 id: d.id,
+                tipoValor: d.tipoValor,
                 categoria: d.categoria,
                 descricao: d.descricao,
                 valor: d.valor.toString(),
+                percentual: d.percentual?.toString() ?? null,
                 frequencia: d.frequencia,
                 primeiraData: chaveDia(d.primeiraData),
                 veiculoId: d.veiculoId,
@@ -231,9 +283,13 @@ export async function DespesasView({
                       <span className="block text-xs text-muted">{d.descricao}</span>
                     )}
                   </Td>
-                  <Td>{d.veiculo?.placa ?? "—"}</Td>
+                  <Td>{isPct ? "Todas" : (d.veiculo?.placa ?? "—")}</Td>
                   <Td>{frequenciaLabel[d.frequencia]}</Td>
-                  <Td>{formatBRL(d.valor.toString())}</Td>
+                  <Td>
+                    {isPct
+                      ? `${Number(d.percentual ?? 0)}% dos aluguéis`
+                      : formatBRL(d.valor.toString())}
+                  </Td>
                   <Td>
                     <Badge tone={d.ativa ? "success" : "neutral"}>
                       {d.ativa ? "Ativa" : "Inativa"}

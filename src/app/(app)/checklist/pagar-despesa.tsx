@@ -12,6 +12,7 @@ import { formaPagamentoLabel } from "@/lib/enums";
 
 export interface PagarProps {
   despesaId: string;
+  veiculoId: string | null;
   dia: string; // yyyy-mm-dd
   titulo: string; // ex.: "Seguro · ABC1D23"
   veicPlaca: string | null;
@@ -33,6 +34,7 @@ function hoje(): string {
 export function PagarDespesa(props: PagarProps) {
   const {
     despesaId,
+    veiculoId,
     dia,
     titulo,
     veicPlaca,
@@ -64,7 +66,7 @@ export function PagarDespesa(props: PagarProps) {
 
   function confirmar() {
     start(async () => {
-      await pagarDespesa(despesaId, dia, Number(valor), data, forma, obs);
+      await pagarDespesa(despesaId, veiculoId, dia, Number(valor), data, forma, obs);
       setOpen(false);
       router.refresh();
     });
@@ -72,7 +74,7 @@ export function PagarDespesa(props: PagarProps) {
 
   function desmarcar() {
     start(async () => {
-      await desmarcarDespesa(despesaId, dia);
+      await desmarcarDespesa(despesaId, veiculoId, dia);
       setOpen(false);
       router.refresh();
     });
