@@ -154,6 +154,7 @@ model Locadora {
   contasBancarias ContaBancaria[]
   manutencoes    Manutencao[]
   documentos     Documento[]
+  despesasRecorrentes DespesaRecorrente[]
 
   @@map("locadora")
 }
@@ -188,6 +189,7 @@ model ContaBancaria {
 
   locadora   Locadora    @relation(fields: [locadoraId], references: [id], onDelete: Cascade)
   transacoes Transacao[]
+  despesasRecorrentes DespesaRecorrente[]
 
   @@index([locadoraId])
   @@map("conta_bancaria")
@@ -222,6 +224,7 @@ model Veiculo {
   documentos  DocumentoVeiculo[]
   documentosGerais Documento[]
   manutencoes Manutencao[]
+  despesasRecorrentes DespesaRecorrente[]
 
   @@unique([locadoraId, placa])
   @@index([locadoraId])
@@ -399,6 +402,7 @@ model Transacao {
   locacaoId       String?            @map("locacao_id")
   veiculoId       String?            @map("veiculo_id")
   contaBancariaId String?            @map("conta_bancaria_id")
+  despesaRecorrenteId String?        @map("despesa_recorrente_id")
   tipo            TipoTransacao
   categoria       CategoriaTransacao
   valor           Decimal            @db.Decimal(12, 2)
@@ -414,6 +418,7 @@ model Transacao {
   locacao       Locacao?       @relation(fields: [locacaoId], references: [id], onDelete: SetNull)
   veiculo       Veiculo?       @relation(fields: [veiculoId], references: [id], onDelete: SetNull)
   contaBancaria ContaBancaria? @relation(fields: [contaBancariaId], references: [id], onDelete: SetNull)
+  despesaRecorrente DespesaRecorrente? @relation(fields: [despesaRecorrenteId], references: [id], onDelete: SetNull)
   manutencao    Manutencao?
 
   @@index([locadoraId])
@@ -421,6 +426,33 @@ model Transacao {
   @@index([status])
   @@index([categoria])
   @@index([locacaoId])
+  @@index([despesaRecorrenteId])
   @@index([dataVencimento])
   @@map("transacao")
+}
+
+// Modelo de despesa que se repete (ex.: seguro todo dia 15). Gera ocorrências
+// no "checklist de despesas"; ao marcar como pago, cria uma Transacao de saída.
+model DespesaRecorrente {
+  id              String              @id @default(cuid())
+  locadoraId      String              @map("locadora_id")
+  veiculoId       String?             @map("veiculo_id")
+  contaBancariaId String?             @map("conta_bancaria_id")
+  categoria       CategoriaTransacao
+  descricao       String?
+  valor           Decimal             @db.Decimal(12, 2)
+  frequencia      FrequenciaPagamento @default(mensal)
+  primeiraData    DateTime            @map("primeira_data") // âncora do 1º vencimento
+  formaPagamento  FormaPagamento?     @map("forma_pagamento")
+  ativa           Boolean             @default(true)
+  criadoEm        DateTime            @default(now()) @map("criado_em")
+
+  locadora      Locadora       @relation(fields: [locadoraId], references: [id], onDelete: Cascade)
+  veiculo       Veiculo?       @relation(fields: [veiculoId], references: [id], onDelete: SetNull)
+  contaBancaria ContaBancaria? @relation(fields: [contaBancariaId], references: [id], onDelete: SetNull)
+  transacoes    Transacao[]
+
+  @@index([locadoraId])
+  @@index([veiculoId])
+  @@map("despesa_recorrente")
 }
