@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea, Select, Field } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { formaPagamentoLabel } from "@/lib/enums";
+import { compressToFileList } from "@/lib/compress-image";
 
 export interface Opcao {
   id: string;
@@ -96,6 +97,21 @@ function ManutencaoForm({
   const [pago, setPago] = useState(manutencao?.pago ?? true);
   const fileRef = useRef<HTMLInputElement>(null);
   const [anexos, setAnexos] = useState<string[]>([]);
+  const [processando, setProcessando] = useState(false);
+
+  async function onArquivos(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = [...(e.target.files ?? [])];
+    if (files.length === 0) {
+      setAnexos([]);
+      return;
+    }
+    setProcessando(true);
+    // Comprime imagens grandes (fotos de celular) antes do envio.
+    const fl = await compressToFileList(files);
+    if (fileRef.current) fileRef.current.files = fl;
+    setAnexos([...fl].map((f) => f.name));
+    setProcessando(false);
+  }
 
   useEffect(() => {
     if (state?.ok) {
@@ -259,9 +275,7 @@ function ManutencaoForm({
           multiple
           accept="image/*,application/pdf"
           className="hidden"
-          onChange={(e) =>
-            setAnexos([...(e.target.files ?? [])].map((f) => f.name))
-          }
+          onChange={onArquivos}
         />
         <div className="flex items-center gap-2">
           <Button
@@ -273,9 +287,11 @@ function ManutencaoForm({
             <Paperclip className="h-4 w-4" /> Anexar recibo / NF
           </Button>
           <span className="text-xs text-muted">
-            {anexos.length > 0
-              ? anexos.join(", ")
-              : "Imagem ou PDF, até 10 MB (opcional)"}
+            {processando
+              ? "Otimizando imagens..."
+              : anexos.length > 0
+                ? anexos.join(", ")
+                : "Imagem ou PDF, até 10 MB (opcional)"}
           </span>
         </div>
       </div>
@@ -290,7 +306,7 @@ function ManutencaoForm({
         <Button type="button" variant="outline" onClick={onDone}>
           Cancelar
         </Button>
-        <Button type="submit" disabled={pending}>
+        <Button type="submit" disabled={pending || processando}>
           {pending ? "Salvando..." : "Salvar"}
         </Button>
       </div>
