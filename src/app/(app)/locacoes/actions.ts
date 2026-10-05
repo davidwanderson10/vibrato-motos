@@ -45,6 +45,60 @@ async function salvarAnexosLocacao(
   }
 }
 
+type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
+/**
+ * Mantém a entrada de "Caução" nas Finanças sincronizada com a locação.
+ * Pendente/parcelada => lançamento pendente; caso contrário => pago na data de início.
+ * Sem valor => remove o lançamento.
+ */
+async function sincronizarCaucao(
+  tx: Tx,
+  locadoraId: string,
+  locacaoId: string,
+  veiculoId: string,
+  valor: number | null,
+  dataInicio: Date,
+  pendente: boolean,
+  statusMudou: boolean,
+) {
+  const existente = await tx.transacao.findFirst({
+    where: { locadoraId, locacaoId, categoria: "caucao", tipo: "entrada" },
+    select: { id: true },
+  });
+  if (!valor || valor <= 0) {
+    if (existente) await tx.transacao.delete({ where: { id: existente.id } });
+    return;
+  }
+  const status = pendente ? ("pendente" as const) : ("pago" as const);
+  const dataPagamento = pendente ? null : dataInicio;
+  if (existente) {
+    await tx.transacao.update({
+      where: { id: existente.id },
+      data: {
+        valor,
+        veiculoId,
+        ...(statusMudou ? { status, dataPagamento } : {}),
+      },
+    });
+  } else {
+    await tx.transacao.create({
+      data: {
+        locadoraId,
+        locacaoId,
+        veiculoId,
+        tipo: "entrada",
+        categoria: "caucao",
+        valor,
+        dataVencimento: dataInicio,
+        dataPagamento,
+        status,
+        observacao: "Caução da locação",
+      },
+    });
+  }
+}
+
 const emptyToNull = (v: unknown) => (v === "" || v === undefined ? null : v);
 const numNull = z.preprocess(emptyToNull, z.coerce.number().nullable());
 const intNull = z.preprocess(emptyToNull, z.coerce.number().int().nullable());
@@ -182,6 +236,17 @@ export async function createLocacao(
         },
       });
 
+      await sincronizarCaucao(
+        tx,
+        usuario.locadoraId,
+        nova.id,
+        d.veiculoId,
+        d.valorCaucao,
+        dataInicio,
+        d.caucaoPendente || d.caucaoParcelada,
+        true,
+      );
+
       // Atualiza o status do veículo.
       await tx.veiculo.update({
         where: { id: d.veiculoId },
@@ -207,6 +272,8 @@ export async function createLocacao(
   revalidatePath("/locacoes");
   revalidatePath("/frota");
   revalidatePath("/documentos");
+  revalidatePath("/financas");
+  revalidatePath("/dashboard");
   return { ok: true };
 }
 
@@ -316,6 +383,19 @@ export async function updateLocacao(
         },
       });
 
+      await sincronizarCaucao(
+        tx,
+        usuario.locadoraId,
+        d.id,
+        d.veiculoId,
+        d.valorCaucao,
+        dataInicio,
+        d.caucaoPendente || d.caucaoParcelada,
+        // Locações antigas não têm o lançamento; mudança nos flags também reaplica o status.
+        existente.caucaoPendente !== d.caucaoPendente ||
+          existente.caucaoParcelada !== d.caucaoParcelada,
+      );
+
       // Reconcilia status dos veículos.
       if (veiculoMudou) {
         await tx.veiculo.update({
@@ -338,6 +418,8 @@ export async function updateLocacao(
   revalidatePath("/locacoes");
   revalidatePath("/frota");
   revalidatePath("/documentos");
+  revalidatePath("/financas");
+  revalidatePath("/dashboard");
   return { ok: true };
 }
 
